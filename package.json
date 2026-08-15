@@ -1,0 +1,27 @@
+{
+  "name": "pivot-humanoid",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Retargeting-Free Language-to-Motion for Closed-Loop Humanoid Control",
+  "author": "huiguangx",
+  "license": "MIT",
+  "repository": "git+https://github.com/huiguangx/PIVOT-Humanoid.git",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@mdi/font": "^7.4.47",
+    "onnxruntime-web": "1.24.1",
+    "roboto-fontface": "^0.10.0",
+    "three": "^0.180.0",
+    "vue": "3.5.27",
+    "vuetify": "^3.10.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.0",
+    "vite": "^7.0.0"
+  }
+}
