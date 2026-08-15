@@ -67,7 +67,7 @@ export class PolicyRunner {
   }
 }
 
-class OnnxModel {
+export class OnnxModel {
   constructor(config) {
     this.path = config.path
     this.meta = config.meta
