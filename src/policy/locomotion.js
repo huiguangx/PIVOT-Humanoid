@@ -56,6 +56,10 @@ export class LocomotionRunner {
       this.defaultJointPos[index] + this.actionScale * value
     ))
   }
+
+  dispose() {
+    return this.model.dispose?.()
+  }
 }
 
 export function buildLocomotionObservation(state, command, previousAction, phase, config) {

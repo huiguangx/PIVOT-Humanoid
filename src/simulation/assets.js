@@ -38,7 +38,7 @@ export async function loadMotions(url, fetchImpl = fetch) {
   })))
 }
 
-export async function populateMujocoFilesystem(mujoco, root = '/examples/scenes', fetchImpl = fetch) {
+export async function populateMujocoFilesystem(mujoco, root = '/examples/scenes', destination = '', fetchImpl = fetch) {
   const index = await fetchImpl(`${root}/files.json`)
   if (!index.ok) throw new Error(`Failed to load scene index: ${index.status}`)
   const files = await index.json()
@@ -46,7 +46,8 @@ export async function populateMujocoFilesystem(mujoco, root = '/examples/scenes'
   for (let index = 0; index < files.length; index++) {
     const file = files[index]
     const parts = file.split('/')
-    let directory = '/working'
+    let directory = destination ? `/working/${destination}` : '/working'
+    if (!mujoco.FS.analyzePath(directory).exists) mujoco.FS.mkdir(directory)
     for (const part of parts.slice(0, -1)) {
       directory += `/${part}`
       if (!mujoco.FS.analyzePath(directory).exists) mujoco.FS.mkdir(directory)
@@ -56,6 +57,6 @@ export async function populateMujocoFilesystem(mujoco, root = '/examples/scenes'
     const value = /\.(png|stl|skn)$/i.test(file)
       ? new Uint8Array(await response.arrayBuffer())
       : await response.text()
-    mujoco.FS.writeFile(`/working/${file}`, value)
+    mujoco.FS.writeFile(`${destination ? `/working/${destination}` : '/working'}/${file}`, value)
   }
 }

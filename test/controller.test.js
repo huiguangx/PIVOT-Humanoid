@@ -38,3 +38,41 @@ test('drag force uses MuJoCo axes and is capped at 30N', () => {
   assert.deepEqual(Array.from(controllerModule.dragForce({ x: 0, y: 0.1, z: 0 })), [0, 0, 6])
   assert.deepEqual(Array.from(controllerModule.dragForce({ x: 1, y: 0, z: 0 })), [30, 0, 0])
 })
+
+test('failed robot preparation leaves the active runtime unchanged', async () => {
+  const active = { profile: { id: 'g1' } }
+  const controller = Object.create(SimulationController.prototype)
+  Object.assign(controller, {
+    runtime: active,
+    robotId: 'g1',
+    switchVersion: 0,
+    prepareRobotRuntime: async () => { throw new Error('bad H1 policy') },
+  })
+
+  await assert.rejects(() => controller.switchRobot('h1'), /bad H1 policy/)
+  assert.equal(controller.runtime, active)
+  assert.equal(controller.getRobotId(), 'g1')
+})
+
+test('a stale robot switch cannot replace a newer selection', async () => {
+  let resolveH1
+  const h1 = new Promise((resolve) => { resolveH1 = resolve })
+  const committed = []
+  const disposed = []
+  const controller = Object.create(SimulationController.prototype)
+  Object.assign(controller, {
+    switchVersion: 0,
+    prepareRobotRuntime: ({ id }) => id === 'h1' ? h1 : Promise.resolve({ profile: { id } }),
+    commitRobotRuntime: (runtime) => committed.push(runtime.profile.id),
+    disposeRobotRuntime: (runtime) => disposed.push(runtime.profile.id),
+  })
+
+  const older = controller.switchRobot('h1')
+  const newer = controller.switchRobot('g1')
+  resolveH1({ profile: { id: 'h1' } })
+
+  assert.equal(await newer, true)
+  assert.equal(await older, false)
+  assert.deepEqual(committed, ['g1'])
+  assert.deepEqual(disposed, ['h1'])
+})

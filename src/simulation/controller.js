@@ -1,18 +1,19 @@
 import createMujoco from '../vendor/mujoco.js'
+import { Scene } from 'three'
+
+import { LocomotionRunner } from '../policy/locomotion.js'
 import { PolicyRunner } from '../policy/runner.js'
+import { DEFAULT_ROBOT_ID, getRobotProfile } from '../robots/registry.js'
 import { loadMotions, loadPolicyConfig, populateMujocoFilesystem } from './assets.js'
 import { buildScene, createRenderer, DragInteraction, updateBodies } from './scene.js'
 
-const DEFAULT_POLICY = '/examples/checkpoints/g1/tracking_policy_amass.json'
-
 export class SimulationController {
-  static async create(container) {
+  static async create(container, robotId = DEFAULT_ROBOT_ID) {
     const mujoco = await createMujoco()
     if (!mujoco.FS.analyzePath('/working').exists) mujoco.FS.mkdir('/working')
     mujoco.FS.mount(mujoco.MEMFS, { root: '.' }, '/working')
-    await populateMujocoFilesystem(mujoco)
     const controller = new SimulationController(mujoco, container)
-    await controller.init()
+    await controller.init(robotId)
     return controller
   }
 
@@ -27,45 +28,129 @@ export class SimulationController {
     this.zeroTorque = new Float64Array(3)
     this.simStepHz = 0
     this.alive = false
+    this.runtime = null
+    this.switchVersion = 0
+    this.loadedAssetRoots = new Set()
     this.resize = () => this.onResize()
     addEventListener('resize', this.resize)
     this.renderer.setAnimationLoop(() => this.render())
   }
 
-  async init() {
-    await this.loadScene('g1/g1.xml')
-    await this.reloadPolicy(DEFAULT_POLICY)
+  async init(robotId = DEFAULT_ROBOT_ID) {
+    await this.switchRobot(robotId)
     this.alive = true
   }
 
-  async loadScene(path) {
-    this.drag?.end()
-    this.model?.delete()
-    this.data?.delete()
-    this.scene.getObjectByName('MuJoCo Root')?.removeFromParent()
-    this.model = this.mujoco.MjModel.loadFromXML(`/working/${path}`)
-    this.data = new this.mujoco.MjData(this.model)
-    ;({ root: this.mujocoRoot, bodies: this.bodies, lights: this.lights } = buildScene(this.mujoco, this.model, this.data, this.scene))
-    this.jointNames = decodeNames(this.model.names, this.model.name_jntadr, this.model.njnt)
-    this.timestep = this.model.opt.timestep
-    this.decimation = Math.max(1, Math.round(0.02 / this.timestep))
+  async switchRobot(robotId) {
+    const profile = getRobotProfile(robotId)
+    const version = ++this.switchVersion
+    let candidate
+    try {
+      candidate = await this.prepareRobotRuntime(profile)
+      if (version !== this.switchVersion) {
+        this.disposeRobotRuntime(candidate)
+        return false
+      }
+      this.commitRobotRuntime(candidate)
+      return true
+    } catch (cause) {
+      if (candidate) this.disposeRobotRuntime(candidate)
+      throw cause
+    }
   }
 
-  async reloadPolicy(path = DEFAULT_POLICY, { onnxPath } = {}) {
-    const config = await loadPolicyConfig(path)
-    if (onnxPath) config.onnx = { ...config.onnx, path: onnxPath }
-    if (config.tracking?.motions_path && !config.tracking.motions) {
-      config.tracking.motions = await loadMotions(new URL(config.tracking.motions_path, location.href))
+  async prepareRobotRuntime(profile) {
+    let model, data, runner, root
+    try {
+      const assetKey = `${profile.assetRoot}:${profile.assetDestination}`
+      if (!this.loadedAssetRoots?.has(assetKey)) {
+        await populateMujocoFilesystem(this.mujoco, profile.assetRoot, profile.assetDestination)
+        this.loadedAssetRoots?.add(assetKey)
+      }
+      const config = await loadPolicyConfig(profile.policy)
+      if (config.tracking?.motions_path && !config.tracking.motions) {
+        config.tracking.motions = await loadMotions(new URL(config.tracking.motions_path, location.href))
+      }
+
+      model = this.mujoco.MjModel.loadFromXML(`/working/${profile.scene}`)
+      data = new this.mujoco.MjData(model)
+      const jointNames = decodeNames(model.names, model.name_jntadr, model.njnt)
+      const mapping = mapJoints(this.mujoco, model, jointNames, config.policy_joint_names)
+      runner = profile.driver === 'tracking' ? new PolicyRunner(config) : new LocomotionRunner(config)
+      await runner.init()
+
+      const runtime = {
+        profile,
+        model,
+        data,
+        runner,
+        jointNames,
+        policyJointNames: config.policy_joint_names.slice(),
+        ...mapping,
+        kp: Float32Array.from(config.stiffness),
+        kd: Float32Array.from(config.damping),
+        controlType: config.control_type ?? 'joint_position',
+        timestep: model.opt.timestep,
+        decimation: Math.max(1, Math.round((config.control_dt ?? 0.02) / model.opt.timestep)),
+        currentPolicyPath: profile.policy,
+      }
+      const state = readRuntimeState(runtime)
+      runner.reset(state)
+      const target = await runner.step(state)
+      if (target?.length !== runtime.policyJointNames.length || Array.from(target).some((value) => !Number.isFinite(value))) {
+        throw new Error(`Invalid ${profile.id} policy target`)
+      }
+      runner.reset(state)
+
+      const stagingScene = new Scene()
+      const visual = buildScene(this.mujoco, model, data, stagingScene)
+      ;({ root } = visual)
+      return { ...runtime, ...visual }
+    } catch (cause) {
+      root?.removeFromParent()
+      await runner?.dispose?.()
+      data?.delete?.()
+      model?.delete?.()
+      throw cause
     }
-    this.#mapJoints(config.policy_joint_names)
-    this.kp = Float32Array.from(config.stiffness)
-    this.kd = Float32Array.from(config.damping)
-    this.controlType = config.control_type ?? 'joint_position'
-    this.policyRunner = new PolicyRunner(config)
-    await this.policyRunner.init()
-    this.policyRunner.reset(this.readPolicyState())
-    this.currentPolicyPath = path
+  }
+
+  commitRobotRuntime(runtime) {
+    const previous = this.runtime
+    this.drag?.end()
+    runtime.root.removeFromParent()
+    previous?.root?.removeFromParent()
+    this.scene?.add(runtime.root)
+    this.runtime = runtime
+    this.robotId = runtime.profile.id
+    Object.assign(this, {
+      model: runtime.model,
+      data: runtime.data,
+      policyRunner: runtime.runner,
+      mujocoRoot: runtime.root,
+      bodies: runtime.bodies,
+      lights: runtime.lights,
+      jointNames: runtime.jointNames,
+      policyJointNames: runtime.policyJointNames,
+      ctrlAddresses: runtime.ctrlAddresses,
+      qposAddresses: runtime.qposAddresses,
+      qvelAddresses: runtime.qvelAddresses,
+      kp: runtime.kp,
+      kd: runtime.kd,
+      controlType: runtime.controlType,
+      timestep: runtime.timestep,
+      decimation: runtime.decimation,
+      currentPolicyPath: runtime.currentPolicyPath,
+    })
     this.params.current_motion = 'default'
+    if (previous) this.disposeRobotRuntime(previous)
+  }
+
+  disposeRobotRuntime(runtime) {
+    runtime?.root?.removeFromParent()
+    runtime?.runner?.dispose?.()
+    runtime?.data?.delete?.()
+    runtime?.model?.delete?.()
   }
 
   start(onError) {
@@ -127,34 +212,8 @@ export class SimulationController {
     )
   }
 
-  #mapJoints(names) {
-    const jointTransmission = this.mujoco.mjtTrn.mjTRN_JOINT.value
-    const actuatorJoints = Array.from({ length: this.model.nu }, (_, index) => {
-      if (this.model.actuator_trntype[index] !== jointTransmission) throw new Error(`Unsupported actuator ${index}`)
-      return this.model.actuator_trnid[index * 2]
-    })
-    this.policyJointNames = names.slice()
-    this.ctrlAddresses = []
-    this.qposAddresses = []
-    this.qvelAddresses = []
-    for (const name of names) {
-      const joint = this.jointNames.indexOf(name)
-      const actuator = actuatorJoints.indexOf(joint)
-      if (joint < 0 || actuator < 0) throw new Error(`Joint not mapped: ${name}`)
-      this.ctrlAddresses.push(actuator)
-      this.qposAddresses.push(this.model.jnt_qposadr[joint])
-      this.qvelAddresses.push(this.model.jnt_dofadr[joint])
-    }
-  }
-
   readPolicyState() {
-    return {
-      jointPos: Float32Array.from(this.qposAddresses, (address) => this.data.qpos[address]),
-      jointVel: Float32Array.from(this.qvelAddresses, (address) => this.data.qvel[address]),
-      rootPos: Float32Array.from(this.data.qpos.slice(0, 3)),
-      rootQuat: Float32Array.from(this.data.qpos.slice(3, 7)),
-      rootAngVel: Float32Array.from(this.data.qvel.slice(3, 6)),
-    }
+    return readRuntimeState(this.runtime)
   }
 
   resetSimulation() {
@@ -165,6 +224,13 @@ export class SimulationController {
   }
 
   isUpright(options) { return isUprightState(this.readPolicyState(), options) }
+  getRobotId() { return this.runtime?.profile.id ?? this.robotId ?? null }
+  getCapabilities() { return this.runtime?.profile.capabilities ?? [] }
+  setLocomotionCommand(command) {
+    if (!this.policyRunner?.setCommand) return false
+    this.policyRunner.setCommand(command)
+    return true
+  }
   getSimStepHz() { return this.simStepHz }
   setFollowEnabled(value) { this.followEnabled = Boolean(value) }
   setRenderScale(value) { this.renderScale = Math.max(0.5, Math.min(2, value)); this.renderer.setPixelRatio(this.renderScale) }
@@ -188,8 +254,8 @@ export class SimulationController {
     this.controls.dispose()
     this.drag.dispose()
     this.renderer.dispose()
-    this.model?.delete()
-    this.data?.delete()
+    this.disposeRobotRuntime(this.runtime)
+    this.runtime = null
   }
 }
 
@@ -227,4 +293,34 @@ function decodeNames(rawNames, addresses, count) {
     while (end < bytes.length && bytes[end]) end++
     return decoder.decode(bytes.subarray(start, end))
   })
+}
+
+function mapJoints(mujoco, model, jointNames, names) {
+  const jointTransmission = mujoco.mjtTrn.mjTRN_JOINT.value
+  const actuatorJoints = Array.from({ length: model.nu }, (_, index) => {
+    if (model.actuator_trntype[index] !== jointTransmission) throw new Error(`Unsupported actuator ${index}`)
+    return model.actuator_trnid[index * 2]
+  })
+  const ctrlAddresses = []
+  const qposAddresses = []
+  const qvelAddresses = []
+  for (const name of names) {
+    const joint = jointNames.indexOf(name)
+    const actuator = actuatorJoints.indexOf(joint)
+    if (joint < 0 || actuator < 0) throw new Error(`Joint not mapped: ${name}`)
+    ctrlAddresses.push(actuator)
+    qposAddresses.push(model.jnt_qposadr[joint])
+    qvelAddresses.push(model.jnt_dofadr[joint])
+  }
+  return { ctrlAddresses, qposAddresses, qvelAddresses }
+}
+
+function readRuntimeState(runtime) {
+  return {
+    jointPos: Float32Array.from(runtime.qposAddresses, (address) => runtime.data.qpos[address]),
+    jointVel: Float32Array.from(runtime.qvelAddresses, (address) => runtime.data.qvel[address]),
+    rootPos: Float32Array.from(runtime.data.qpos.slice(0, 3)),
+    rootQuat: Float32Array.from(runtime.data.qpos.slice(3, 7)),
+    rootAngVel: Float32Array.from(runtime.data.qvel.slice(3, 6)),
+  }
 }

@@ -65,6 +65,10 @@ export class PolicyRunner {
       this.running = false
     }
   }
+
+  dispose() {
+    return this.model.dispose()
+  }
 }
 
 export class OnnxModel {
@@ -96,6 +100,11 @@ export class OnnxModel {
       ? { is_init: new Tensor('bool', [false], [1]), adapt_hx: output['next,adapt_hx'] }
       : {}
     return [output, recurrent]
+  }
+
+  async dispose() {
+    await this.session?.release?.()
+    this.session = null
   }
 }
 

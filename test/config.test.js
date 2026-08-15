@@ -30,5 +30,24 @@ test('scene population rejects failed asset responses', async () => {
     ? new Response(JSON.stringify(['missing.stl']))
     : new Response('', { status: 404 })
 
-  await assert.rejects(() => populateMujocoFilesystem(mujoco, '/scenes', fetch), /missing\.stl: 404/)
+  await assert.rejects(() => populateMujocoFilesystem(mujoco, '/scenes', '', fetch), /missing\.stl: 404/)
+})
+
+test('scene population writes robot assets into an isolated destination', async () => {
+  const directories = new Set(['/working', '/working/g1'])
+  const writes = new Map([['/working/g1/keep.xml', 'g1']])
+  const mujoco = { FS: {
+    analyzePath: (path) => ({ exists: directories.has(path) }),
+    mkdir: (path) => directories.add(path),
+    writeFile: (path, value) => writes.set(path, value),
+  } }
+  const fetch = async (url) => url.endsWith('files.json')
+    ? new Response(JSON.stringify(['scene.xml', 'meshes/pelvis.stl']))
+    : new Response(url)
+
+  await populateMujocoFilesystem(mujoco, '/examples/scenes/h1', 'h1', fetch)
+
+  assert.equal(writes.get('/working/g1/keep.xml'), 'g1')
+  assert.equal(writes.get('/working/h1/scene.xml'), '/examples/scenes/h1/scene.xml')
+  assert.ok(writes.get('/working/h1/meshes/pelvis.stl') instanceof Uint8Array)
 })
