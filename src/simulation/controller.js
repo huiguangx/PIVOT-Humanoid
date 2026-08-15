@@ -188,7 +188,7 @@ export class SimulationController {
   #applyControl(target) {
     for (let index = 0; index < this.policyJointNames.length; index++) {
       const actuator = this.ctrlAddresses[index]
-      const range = this.model.actuator_ctrlrange.slice(actuator * 2, actuator * 2 + 2)
+      const range = actuatorControlRange(this.model, actuator)
       this.data.ctrl[actuator] = pdTorque(
         target[index], this.data.qpos[this.qposAddresses[index]], this.data.qvel[this.qvelAddresses[index]],
         this.kp[index], this.kd[index], range,
@@ -261,6 +261,12 @@ export class SimulationController {
 
 export function pdTorque(target, position, velocity, stiffness, damping, [minimum, maximum]) {
   return Math.min(Math.max(stiffness * (target - position) - damping * velocity, minimum), maximum)
+}
+
+export function actuatorControlRange(model, actuator) {
+  return model.actuator_ctrllimited[actuator]
+    ? Array.from(model.actuator_ctrlrange.slice(actuator * 2, actuator * 2 + 2))
+    : [-Infinity, Infinity]
 }
 
 export function threeToMujoco({ x, y, z }) {

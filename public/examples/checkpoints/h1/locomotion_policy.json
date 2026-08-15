@@ -1,0 +1,48 @@
+{
+  "source": {
+    "repository": "https://github.com/unitreerobotics/unitree_rl_gym",
+    "commit": "276801e46c5d433564f24658bac64f254b7d2d4b",
+    "torchscript_sha256": "44a0fbceb81f3877833ae9a398d039bea1759cb0d3c8188181013885f70589eb"
+  },
+  "onnx": {
+    "path": "./examples/checkpoints/h1/motion.onnx",
+    "meta": {
+      "in_keys": ["policy", "hidden_state", "cell_state"],
+      "out_keys": ["action", "next_hidden_state", "next_cell_state"]
+    },
+    "recurrent": {
+      "hidden_state": [1, 1, 64],
+      "cell_state": [1, 1, 64]
+    }
+  },
+  "policy_joint_names": [
+    "left_hip_yaw_joint",
+    "left_hip_roll_joint",
+    "left_hip_pitch_joint",
+    "left_knee_joint",
+    "left_ankle_joint",
+    "right_hip_yaw_joint",
+    "right_hip_roll_joint",
+    "right_hip_pitch_joint",
+    "right_knee_joint",
+    "right_ankle_joint"
+  ],
+  "stiffness": [150, 150, 150, 200, 40, 150, 150, 150, 200, 40],
+  "damping": [2, 2, 2, 4, 2, 2, 2, 2, 4, 2],
+  "default_joint_pos": [0, 0, -0.1, 0.3, -0.2, 0, 0, -0.1, 0.3, -0.2],
+  "control_type": "joint_position",
+  "control_dt": 0.02,
+  "action_scale": 0.25,
+  "gait_period": 0.8,
+  "command_scale": [2, 2, 0.25],
+  "command_limits": {
+    "forward": [-1, 1],
+    "lateral": [-1, 1],
+    "yaw": [-1, 1]
+  },
+  "observation_scale": {
+    "angularVelocity": 0.25,
+    "jointPosition": 1,
+    "jointVelocity": 0.05
+  }
+}

@@ -24,6 +24,17 @@ test('deployed motion index resolves all 17 local clips', async () => {
   assert.equal(entries.at(-1).name, 'TaiChi_CMU_12_04_amass')
 })
 
+test('deployed H1 policy exposes the official recurrent locomotion contract', async () => {
+  const raw = await readJson('../public/examples/checkpoints/h1/locomotion_policy.json')
+  const config = parsePolicyConfig(raw)
+
+  assert.equal(config.policy_joint_names.length, 10)
+  assert.deepEqual(config.onnx.meta.in_keys, ['policy', 'hidden_state', 'cell_state'])
+  assert.deepEqual(config.onnx.meta.out_keys, ['action', 'next_hidden_state', 'next_cell_state'])
+  assert.deepEqual(config.onnx.recurrent.hidden_state, [1, 1, 64])
+  assert.equal(config.control_dt, 0.02)
+})
+
 test('scene population rejects failed asset responses', async () => {
   const mujoco = { FS: { analyzePath: () => ({ exists: true }), mkdir() {}, writeFile() {} } }
   const fetch = async (url) => url.endsWith('files.json')

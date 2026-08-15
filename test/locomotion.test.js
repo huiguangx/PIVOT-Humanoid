@@ -62,3 +62,33 @@ test('H1 runner rejects invalid policy output without updating previous action',
   await assert.rejects(() => runner.step(state), /Invalid locomotion policy output/)
   assert.deepEqual(Array.from(runner.previousAction), Array(10).fill(0))
 })
+
+test('H1 runner owns and advances its recurrent state', async () => {
+  const recurrentConfig = {
+    ...config,
+    onnx: {
+      ...config.onnx,
+      recurrent: { hidden_state: [1, 1, 64], cell_state: [1, 1, 64] },
+    },
+  }
+  let feeds
+  const nextHidden = { data: Float32Array.from({ length: 64 }, () => 2) }
+  const nextCell = { data: Float32Array.from({ length: 64 }, () => 3) }
+  const model = { run: async (value) => {
+    feeds = value
+    return [{
+      action: { data: new Float32Array(10) },
+      next_hidden_state: nextHidden,
+      next_cell_state: nextCell,
+    }, {}]
+  } }
+  const runner = new LocomotionRunner(recurrentConfig, model)
+  runner.reset(state)
+
+  await runner.step(state)
+
+  assert.deepEqual(feeds.hidden_state.dims, [1, 1, 64])
+  assert.deepEqual(feeds.cell_state.dims, [1, 1, 64])
+  assert.equal(runner.recurrentInput.hidden_state, nextHidden)
+  assert.equal(runner.recurrentInput.cell_state, nextCell)
+})

@@ -7,4 +7,7 @@ test('standalone project owns its runtime inputs', () => {
   assert.ok(existsSync(new URL('../public/examples/checkpoints/g1/policy_amass.onnx', import.meta.url)))
   assert.ok(existsSync(new URL('../public/assets/ort-wasm-simd-threaded.jsep.mjs', import.meta.url)))
   assert.ok(existsSync(new URL('../public/assets/ort-wasm-simd-threaded.jsep.wasm', import.meta.url)))
+  assert.ok(existsSync(new URL('../public/examples/scenes/h1/scene.xml', import.meta.url)))
+  assert.ok(existsSync(new URL('../public/examples/checkpoints/h1/motion.onnx', import.meta.url)))
+  assert.ok(existsSync(new URL('../public/examples/checkpoints/h1/locomotion_policy.json', import.meta.url)))
 })

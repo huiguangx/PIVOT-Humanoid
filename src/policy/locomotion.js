@@ -13,6 +13,8 @@ export class LocomotionRunner {
     this.model = model
     this.command = { forward: 0, lateral: 0, yaw: 0 }
     this.previousAction = new Float32Array(this.numActions)
+    this.recurrentShapes = config.onnx.recurrent ?? {}
+    this.recurrentInput = {}
     this.elapsed = 0
   }
 
@@ -22,6 +24,10 @@ export class LocomotionRunner {
 
   reset() {
     this.previousAction.fill(0)
+    this.recurrentInput = Object.fromEntries(Object.entries(this.recurrentShapes).map(([key, shape]) => [
+      key,
+      new Tensor('float32', new Float32Array(shape.reduce((product, value) => product * value, 1)), shape),
+    ]))
     this.elapsed = 0
   }
 
@@ -46,12 +52,23 @@ export class LocomotionRunner {
     )
     const [output] = await this.model.run({
       policy: new Tensor('float32', observation, [1, observation.length]),
+      ...this.recurrentInput,
     })
     const action = output.action?.data
     if (action?.length !== this.numActions || Array.from(action).some((value) => !Number.isFinite(value))) {
       throw new Error('Invalid locomotion policy output')
     }
+    const nextRecurrent = {}
+    for (const [key, shape] of Object.entries(this.recurrentShapes)) {
+      const value = output[`next_${key}`]
+      const size = shape.reduce((product, item) => product * item, 1)
+      if (value?.data?.length !== size || Array.from(value.data).some((item) => !Number.isFinite(item))) {
+        throw new Error(`Invalid locomotion recurrent output: ${key}`)
+      }
+      nextRecurrent[key] = value
+    }
     this.previousAction.set(action)
+    this.recurrentInput = nextRecurrent
     return Float32Array.from(action, (value, index) => (
       this.defaultJointPos[index] + this.actionScale * value
     ))

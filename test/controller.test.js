@@ -3,11 +3,21 @@ import { test } from 'node:test'
 
 import * as controllerModule from '../src/simulation/controller.js'
 
-const { SimulationController, isUprightState, pdTorque } = controllerModule
+const { SimulationController, actuatorControlRange, isUprightState, pdTorque } = controllerModule
 
 test('PD torque is clipped to the actuator range', () => {
   assert.equal(pdTorque(2, 0, 0, 100, 2, [-50, 50]), 50)
   assert.equal(pdTorque(-2, 0, 0, 100, 2, [-50, 50]), -50)
+})
+
+test('unlimited torque motors are not clamped to MuJoCo default zero range', () => {
+  const model = {
+    actuator_ctrllimited: [0, 1],
+    actuator_ctrlrange: [0, 0, -20, 20],
+  }
+
+  assert.deepEqual(actuatorControlRange(model, 0), [-Infinity, Infinity])
+  assert.deepEqual(actuatorControlRange(model, 1), [-20, 20])
 })
 
 test('upright detection checks torso tilt and both knees', () => {
