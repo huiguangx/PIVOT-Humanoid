@@ -15,6 +15,9 @@ PIVOT turns natural-language motion descriptions into robot-native motion refere
 - Closed-loop 29-joint humanoid control with future-reference conditioning
 - Interactive MuJoCo simulation with physical perturbations
 - Browser-local ONNX policy execution
+- Isolated G1/H1 robot switching with per-robot models, policies, and controls
+
+G1 provides whole-body reference-motion tracking and motion import. H1 uses Unitree's official recurrent locomotion policy for standing, walking, turning, and perturbation testing. H1 does not yet support arbitrary whole-body motion clips.
 
 ### Run locally
 
@@ -52,6 +55,9 @@ PIVOT 将自然语言动作描述转换为机器人原生动作参考，并通�
 - 基于未来参考条件的 29 关节闭环人形机器人控制
 - 支持物理扰动交互的 MuJoCo 仿真环境
 - 在浏览器本地执行 ONNX 控制策略
+- G1/H1 独立机器人切换，各自使用独立模型、策略和控制界面
+
+G1 支持全身参考动作跟踪和动作导入。H1 使用 Unitree 官方循环式运动策略，支持站立、行走、转向和扰动测试；当前暂不支持任意全身动作片段。
 
 ### 本地运行
 

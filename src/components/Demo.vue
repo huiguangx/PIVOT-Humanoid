@@ -16,7 +16,16 @@
       </v-card-title>
 
       <v-card-text class="controls-body">
-        <section class="usage">
+        <section class="robot-picker">
+          <span class="section-label">Robot</span>
+          <v-btn-toggle :model-value="robotId" mandatory divided density="compact" color="primary">
+            <v-btn v-for="robot in robotOptions" :key="robot.id" :value="robot.id" :loading="switchingRobot && robot.id !== robotId" :disabled="state !== 1 || switchingRobot" @click="switchRobot(robot.id)">
+              {{ robot.label }}
+            </v-btn>
+          </v-btn-toggle>
+        </section>
+
+        <section v-if="supports('motions')" class="usage">
           <h3>Usage</h3>
           <ul>
             <li>Type a text description and press Enter (or tap Generate) to create a motion.</li>
@@ -31,21 +40,22 @@
           </ul>
         </section>
 
-        <v-divider />
-        <section>
+        <v-divider v-if="supports('motions')" />
+        <section v-if="supports('motions')">
           <span class="section-label">Shortcuts</span>
           <div class="button-row">
             <v-btn v-for="command in commands" :key="command" size="x-small" variant="tonal" color="primary" :disabled="state !== 1" @click="runCommand(command)">{{ command }}</v-btn>
           </div>
         </section>
 
-        <template v-if="availableMotions.length">
+        <template v-if="supports('motions') && availableMotions.length">
           <v-divider />
           <v-select v-model="currentMotion" :items="availableMotions" label="Motion" density="compact" hide-details @update:model-value="selectMotion" />
-          <v-file-input v-model="uploadFiles" class="motion-upload" label="Import motion JSON" accept="application/json,.json" multiple density="compact" hide-details prepend-icon="mdi-upload" @update:model-value="uploadMotions" />
+          <v-file-input v-if="supports('motionUpload')" v-model="uploadFiles" class="motion-upload" label="Import motion JSON" accept="application/json,.json" multiple density="compact" hide-details prepend-icon="mdi-upload" @update:model-value="uploadMotions" />
           <v-alert v-if="uploadMessage" :type="uploadType" density="compact" closable class="mt-2" @click:close="uploadMessage = ''">{{ uploadMessage }}</v-alert>
         </template>
 
+        <template v-if="supports('textMotion')">
         <v-divider />
         <section>
           <div class="generate-heading">
@@ -67,6 +77,20 @@
           <div class="generate-heading"><span class="section-label">Generated</span><v-chip size="x-small">{{ generated.length }}/10</v-chip></div>
           <div class="example-row"><v-chip v-for="motion in generated" :key="motion.motion_id" size="x-small" variant="tonal" @click="playGenerated(motion)"><v-icon icon="mdi-play-circle" />{{ motion.text_prompt || motion.motion_id }}</v-chip></div>
         </section>
+        </template>
+
+        <template v-if="supports('locomotion')">
+          <v-divider />
+          <section class="locomotion-controls">
+            <div class="generate-heading">
+              <span class="section-label">Locomotion</span>
+              <v-btn size="x-small" variant="tonal" color="primary" :disabled="switchingRobot" @click="stopLocomotion"><v-icon icon="mdi-stop-circle-outline" /> Stand</v-btn>
+            </div>
+            <v-slider v-model="locomotionCommand.forward" label="Forward" :min="-1" :max="1" :step="0.1" thumb-label density="compact" hide-details @update:model-value="updateLocomotion" />
+            <v-slider v-model="locomotionCommand.lateral" label="Lateral" :min="-1" :max="1" :step="0.1" thumb-label density="compact" hide-details @update:model-value="updateLocomotion" />
+            <v-slider v-model="locomotionCommand.yaw" label="Turn" :min="-1" :max="1" :step="0.1" thumb-label density="compact" hide-details @update:model-value="updateLocomotion" />
+          </section>
+        </template>
         <p v-if="message" class="status-message">{{ message }}</p>
       </v-card-text>
       <v-card-actions><v-btn color="primary" block :disabled="state !== 1" @click="reset">Reset</v-btn></v-card-actions>
@@ -82,7 +106,8 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { DEFAULT_ROBOT_ID, hasCapability, ROBOT_PROFILES } from '../robots/registry.js'
 import { SimulationController } from '../simulation/controller.js'
 import { TextMotionClient } from '../text-motion/client.js'
 import { TEXT_MOTION_TOKEN, TEXT_MOTION_URL } from '../text-motion/config.js'
@@ -91,6 +116,8 @@ const state = ref(0), error = ref(''), currentMotion = ref('default'), available
 const prompt = ref(''), motionLength = ref(4), showGenerator = ref(false), textStatus = ref('disconnected')
 const textError = ref(''), generating = ref(false), generated = ref([]), lastGenerated = ref(null), message = ref('')
 const uploadFiles = ref([]), uploadMessage = ref(''), uploadType = ref('success')
+const robotId = ref(DEFAULT_ROBOT_ID), switchingRobot = ref(false)
+const locomotionCommand = reactive({ forward: 0, lateral: 0, yaw: 0 })
 const commands = ['default', 'up', 'last', 'list', 'status', 'clear']
 const examples = ['walk in a circle', 'do jumping jacks', 'a person is jogging on the spot']
 const getUpMotions = new Set(['fallAndGetUp2_subject2', 'fallAndGetUp1_subject1'])
@@ -99,6 +126,9 @@ let simulation, trackingTimer, uprightChecks = 0, monitoringUpright = false
 
 const statusLabel = computed(() => generating.value ? 'Generating...' : textStatus.value === 'connected' ? 'Ready' : textStatus.value === 'error' ? 'Error' : 'Not Connected')
 const statusColor = computed(() => generating.value ? 'warning' : textStatus.value === 'connected' ? 'success' : textStatus.value === 'error' ? 'error' : 'grey')
+const robotOptions = Object.values(ROBOT_PROFILES)
+const activeProfile = computed(() => ROBOT_PROFILES[robotId.value])
+const supports = (capability) => hasCapability(activeProfile.value, capability)
 const tracker = () => simulation?.policyRunner?.tracking
 
 onMounted(async () => {
@@ -123,6 +153,35 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => { clearInterval(trackingTimer); simulation?.dispose() })
+
+async function switchRobot(nextRobotId) {
+  if (nextRobotId === robotId.value || switchingRobot.value) return
+  switchingRobot.value = true
+  try {
+    if (!await simulation.switchRobot(nextRobotId)) return
+    robotId.value = nextRobotId
+    currentMotion.value = 'default'
+    availableMotions.value = tracker()?.availableMotions() ?? []
+    monitoringUpright = false
+    uprightChecks = 0
+    stopLocomotion()
+    showMessage(`${ROBOT_PROFILES[nextRobotId].label} ready.`)
+  } catch (cause) {
+    console.error(cause)
+    showMessage(`Could not load ${ROBOT_PROFILES[nextRobotId].label}: ${cause.message ?? cause}`)
+  } finally {
+    switchingRobot.value = false
+  }
+}
+
+function updateLocomotion() {
+  simulation?.setLocomotionCommand({ ...locomotionCommand })
+}
+
+function stopLocomotion() {
+  Object.assign(locomotionCommand, { forward: 0, lateral: 0, yaw: 0 })
+  updateLocomotion()
+}
 
 async function connectTextMotion() {
   try {
@@ -224,5 +283,5 @@ function updateTrackingState() {
 }
 
 function showMessage(value) { message.value = value; setTimeout(() => { message.value = '' }, 4000) }
-function reset() { simulation?.resetSimulation(); currentMotion.value = 'default' }
+function reset() { if (supports('locomotion')) stopLocomotion(); simulation?.resetSimulation(); currentMotion.value = 'default' }
 </script>

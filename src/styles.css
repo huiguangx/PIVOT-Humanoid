@@ -23,6 +23,10 @@ body,
 .links a { color: #1867c0; text-decoration: none; }
 .disabled-link { color: #999; }
 .controls-body { flex: 1; overflow-y: auto; padding-top: 6px; }
+.robot-picker { align-items: center; display: flex; justify-content: space-between; }
+.robot-picker .section-label { margin: 0; }
+.robot-picker .v-btn-toggle { flex: 0 0 220px; height: 32px; }
+.robot-picker .v-btn { flex: 1; font-size: 11px; }
 .usage { font-size: 12px; line-height: 1.4; }
 .usage h3 { font-size: 14px; margin: 0 0 4px; }
 .usage ul { margin: 4px 0 7px; padding-left: 18px; }
@@ -38,6 +42,8 @@ kbd { background: #eee; border: 1px solid #ccc; border-radius: 3px; padding: 1px
 .v-number-input { margin: 9px 0; max-width: 150px; }
 .motion-upload { margin-top: 9px; }
 .generated { margin-top: 12px; }
+.locomotion-controls .v-slider { margin: 6px 0; }
+.locomotion-controls .v-input__prepend { min-width: 58px; }
 .status-message { background: #eef4fb; border-left: 3px solid #1867c0; font-size: 12px; padding: 7px; }
 
 @media (max-width: 499px), (max-height: 699px) {

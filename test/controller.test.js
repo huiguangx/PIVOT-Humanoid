@@ -3,7 +3,7 @@ import { test } from 'node:test'
 
 import * as controllerModule from '../src/simulation/controller.js'
 
-const { SimulationController, actuatorControlRange, isUprightState, pdTorque } = controllerModule
+const { SimulationController, actuatorControlRange, isCurrentRuntime, isUprightState, pdTorque } = controllerModule
 
 test('PD torque is clipped to the actuator range', () => {
   assert.equal(pdTorque(2, 0, 0, 100, 2, [-50, 50]), 50)
@@ -85,4 +85,12 @@ test('a stale robot switch cannot replace a newer selection', async () => {
   assert.equal(await older, false)
   assert.deepEqual(committed, ['g1'])
   assert.deepEqual(disposed, ['h1'])
+})
+
+test('an in-flight old policy target is stale after a robot switch', () => {
+  const oldRuntime = { profile: { id: 'g1' } }
+  const newRuntime = { profile: { id: 'h1' } }
+
+  assert.equal(isCurrentRuntime(oldRuntime, oldRuntime), true)
+  assert.equal(isCurrentRuntime(oldRuntime, newRuntime), false)
 })

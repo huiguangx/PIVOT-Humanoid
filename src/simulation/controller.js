@@ -167,15 +167,19 @@ export class SimulationController {
     let sampleStart = performance.now()
     while (this.alive) {
       const started = performance.now()
-      if (!this.params.paused && this.policyRunner) {
-        const target = await this.policyRunner.step(this.readPolicyState())
-        for (let step = 0; step < this.decimation; step++) {
-          this.data.qfrc_applied.fill(0)
-          if (target && this.controlType === 'joint_position') this.#applyControl(target)
-          this.#applyDragForce()
-          this.mujoco.mj_step(this.model, this.data)
+      const runtime = this.runtime
+      const runner = runtime?.runner ?? this.policyRunner
+      if (!this.params.paused && runner) {
+        const target = await runner.step(runtime ? readRuntimeState(runtime) : this.readPolicyState())
+        if (runtime && !isCurrentRuntime(runtime, this.runtime)) continue
+        const active = runtime ?? this
+        for (let step = 0; step < active.decimation; step++) {
+          active.data.qfrc_applied.fill(0)
+          if (target && active.controlType === 'joint_position') this.#applyControl(target, active)
+          this.#applyDragForce(active)
+          this.mujoco.mj_step(active.model, active.data)
         }
-        updateBodies(this.model, this.data, this.bodies, this.lights)
+        updateBodies(active.model, active.data, active.bodies, active.lights)
         frames++
         const elapsed = performance.now() - sampleStart
         if (elapsed >= 500) { this.simStepHz = frames * 1000 / elapsed; frames = 0; sampleStart = performance.now() }
@@ -185,30 +189,30 @@ export class SimulationController {
     }
   }
 
-  #applyControl(target) {
-    for (let index = 0; index < this.policyJointNames.length; index++) {
-      const actuator = this.ctrlAddresses[index]
-      const range = actuatorControlRange(this.model, actuator)
-      this.data.ctrl[actuator] = pdTorque(
-        target[index], this.data.qpos[this.qposAddresses[index]], this.data.qvel[this.qvelAddresses[index]],
-        this.kp[index], this.kd[index], range,
+  #applyControl(target, runtime) {
+    for (let index = 0; index < runtime.policyJointNames.length; index++) {
+      const actuator = runtime.ctrlAddresses[index]
+      const range = actuatorControlRange(runtime.model, actuator)
+      runtime.data.ctrl[actuator] = pdTorque(
+        target[index], runtime.data.qpos[runtime.qposAddresses[index]], runtime.data.qvel[runtime.qvelAddresses[index]],
+        runtime.kp[index], runtime.kd[index], range,
       )
     }
   }
 
-  #applyDragForce() {
+  #applyDragForce(runtime) {
     const object = this.drag.physicsObject
     if (!object?.bodyID) return
-    updateBodies(this.model, this.data, this.bodies)
+    updateBodies(runtime.model, runtime.data, runtime.bodies)
     this.drag.update()
     this.mujoco.mj_applyFT(
-      this.model,
-      this.data,
+      runtime.model,
+      runtime.data,
       dragForce(this.drag.currentWorld.clone().sub(this.drag.worldHit)),
       this.zeroTorque,
       threeToMujoco(this.drag.worldHit),
       object.bodyID,
-      this.data.qfrc_applied,
+      runtime.data.qfrc_applied,
     )
   }
 
@@ -267,6 +271,10 @@ export function actuatorControlRange(model, actuator) {
   return model.actuator_ctrllimited[actuator]
     ? Array.from(model.actuator_ctrlrange.slice(actuator * 2, actuator * 2 + 2))
     : [-Infinity, Infinity]
+}
+
+export function isCurrentRuntime(expected, active) {
+  return expected === active
 }
 
 export function threeToMujoco({ x, y, z }) {
